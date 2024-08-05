@@ -7,72 +7,102 @@ from botcity.web.parsers import table_to_dict
 BotMaestroSDK.RAISE_NOT_CONNECTED = False
 
 def main():
-    # Runner passes the server url, the id of the task being executed,
-    # the access token and the parameters that this task receives (when applicable).
-    maestro = BotMaestroSDK.from_sys_args()
-    ## Fetch the BotExecution with details from the task, including parameters
-    execution = maestro.get_execution()
+    maestro, execution = setup_maestro()
+    
+    bot = setup_bot()
 
+    # Acessa a página dos Correios e seleciona a UF
+    access_correios_website(bot)
+    
+    # Extrai dados da tabela
+    dataTable = extract_table_data(bot)
+    
+    # Acessa o site do IBGE e pesquisa as cidades
+    search_cities_on_ibge(bot, dataTable)
+
+    # Dentro do site do IBGE, pega a poupulação total do município
+    getting_population_on_ibge(bot)
+    
+    finish_task(maestro, execution.task_id)
+    
+
+def setup_maestro():
+    maestro = BotMaestroSDK.from_sys_args()
+    execution = maestro.get_execution()
     print(f"Task ID is: {execution.task_id}")
     print(f"Task Parameters are: {execution.parameters}")
+    return maestro, execution
 
+
+def setup_bot():
     bot = WebBot()
-
-    # Configure whether or not to run on headless mode
     bot.headless = False
-
-    # Uncomment to change the default Browser to Firefox
     bot.browser = Browser.CHROME
-
-    # Uncomment to set the WebDriver path
     bot.driver_path = r"D:\PythonProjects\chromedriver\chromedriver.exe"
+    return bot
 
-    # Opens the BotCity website.
+
+def access_correios_website(bot):
     bot.browse("https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php")
     bot.maximize_window()
-
-    # Seleciona uma localidade dentro do seletor de UF
-    dropUf = element_as_select(bot.find_element("//select[@id='uf']", By.XPATH))
-    dropUf.select_by_value("SP")
-
-    # Clica no botão de pesquisar para procurar localidades
-    findBtn = bot.find_element("//*[@id='btn_pesquisar']", By.XPATH)
-    findBtn.click
-
+    
+    drop_uf = element_as_select(bot.find_element("//select[@id='uf']", By.XPATH))
+    drop_uf.select_by_value("SP")
+    
+    find_btn = bot.find_element("//*[@id='btn_pesquisar']", By.XPATH)
+    find_btn.click()
     bot.wait(3000)
 
-    # Tabela de dados baseada na UF
-    dataTable = bot.find_element("//table[@id='resultado-DNEC']", By.XPATH)
-    dataTableExtract = table_to_dict(table=dataTable)
 
+def extract_table_data(bot):
+    data_table = bot.find_element("//table[@id='resultado-DNEC']", By.XPATH)
+    return table_to_dict(table=data_table)
+
+
+def search_cities_on_ibge(bot, data_table):
     bot.navigate_to("https://cidades.ibge.gov.br/brasil/panorama")
+    max_cities = 5
+    city_count = 0
+    previous_city = ""
 
-    for cidade in dataTable:
-        strCidade = cidade["localidade"]
+    for city in data_table:
+        city_name = city["localidade"]
+        if city_name == previous_city:
+            continue
+        
+        if city_count < max_cities:
+            search_city_on_ibge(bot, city_name)
+            city_count += 1
+            previous_city = city_name
+        else:
+            print("Número máximo de cidades alcançado")
+            break
 
-        inputUfIbge = bot.find_element("/html/body/app/shell/header/busca/div/input", By.XPATH)
-        inputUfIbge.send_keys(strCidade)
-
-        searchCity = bot.find_element(f"//a[contains(span, '{strCidade}')]", By.XPATH)
-        searchCity.click()
-
-    # Wait 3 seconds before closing
     bot.wait(3000)
-
-    # Finish and clean up the Web Browser
     bot.stop_browser()
 
-    # Uncomment to mark this task as finished on BotMaestro
+
+def search_city_on_ibge(bot, city_name):
+    search_input = bot.find_element("/html/body/app/shell/header/busca/div/input", By.XPATH)
+    search_input.send_keys(city_name)
+    
+    bot.wait(1000)
+    
+    search_result = bot.find_element(f"//a[contains(span, '{city_name}')]", By.XPATH)
+    search_result.click()
+    
+    bot.wait(2000)
+
+def getting_population_on_ibge(bot):
+    populacao = (bot.find_element("//div(@class='indicador__valor')", By.XPATH)).text
+
+
+def finish_task(maestro, task_id):
     maestro.finish_task(
-        task_id=execution.task_id,
+        task_id=task_id,
         status=AutomationTaskFinishStatus.SUCCESS,
         message="Task Finished OK."
     )
-
-
-def not_found(label):
-    print(f"Element not found: {label}")
-
 
 if __name__ == '__main__':
     main()
