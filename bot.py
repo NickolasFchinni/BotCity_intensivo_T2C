@@ -2,12 +2,19 @@ from botcity.web import WebBot, Browser, By
 from botcity.maestro import *
 from botcity.web.util import element_as_select
 from botcity.web.parsers import table_to_dict
+from botcity.plugins.excel import BotExcelPlugin
 
 # Disable errors if we are not connected to Maestro
 BotMaestroSDK.RAISE_NOT_CONNECTED = False
 
+excel = BotExcelPlugin()
+excel.add_row(["CIDADE", "POPULAÇÃO"])
+
 def main():
-    maestro, execution = setup_maestro()
+    maestro = BotMaestroSDK.from_sys_args()
+    execution = maestro.get_execution()
+    print(f"Task ID is: {execution.task_id}")
+    print(f"Task Parameters are: {execution.parameters}")
     
     bot = setup_bot()
 
@@ -18,21 +25,14 @@ def main():
     dataTable = extract_table_data(bot)
     
     # Acessa o site do IBGE e pesquisa as cidades
-    search_cities_on_ibge(bot, dataTable)
+    search_cities_on_ibge(bot, dataTable, excel)
 
-    # Dentro do site do IBGE, pega a poupulação total do município
-    getting_population_on_ibge(bot)
-    
-    finish_task(maestro, execution.task_id)
-    
-
-def setup_maestro():
-    maestro = BotMaestroSDK.from_sys_args()
-    execution = maestro.get_execution()
-    print(f"Task ID is: {execution.task_id}")
-    print(f"Task Parameters are: {execution.parameters}")
-    return maestro, execution
-
+    # Finishing the task successfully
+    maestro.finish_task(
+      task_id=execution.task_id,
+      status=AutomationTaskFinishStatus.SUCCESS,
+      message="Task Finished OK."
+    )
 
 def setup_bot():
     bot = WebBot()
@@ -48,6 +48,8 @@ def access_correios_website(bot):
     
     drop_uf = element_as_select(bot.find_element("//select[@id='uf']", By.XPATH))
     drop_uf.select_by_value("SP")
+
+    bot.wait(10000)
     
     find_btn = bot.find_element("//*[@id='btn_pesquisar']", By.XPATH)
     find_btn.click()
@@ -59,7 +61,7 @@ def extract_table_data(bot):
     return table_to_dict(table=data_table)
 
 
-def search_cities_on_ibge(bot, data_table):
+def search_cities_on_ibge(bot, data_table, excel):
     bot.navigate_to("https://cidades.ibge.gov.br/brasil/panorama")
     max_cities = 5
     city_count = 0
@@ -74,13 +76,14 @@ def search_cities_on_ibge(bot, data_table):
             search_city_on_ibge(bot, city_name)
             city_count += 1
             previous_city = city_name
+            getting_population_on_ibge(bot, excel, city_name)
+
         else:
             print("Número máximo de cidades alcançado")
             break
-
+    
+    excel.write(r"D:\PythonProjects\intensivo_botcity\excel\dados_ibge.xlsx")
     bot.wait(3000)
-    bot.stop_browser()
-
 
 def search_city_on_ibge(bot, city_name):
     search_input = bot.find_element("/html/body/app/shell/header/busca/div/input", By.XPATH)
@@ -93,16 +96,14 @@ def search_city_on_ibge(bot, city_name):
     
     bot.wait(2000)
 
-def getting_population_on_ibge(bot):
-    populacao = (bot.find_element("//div(@class='indicador__valor')", By.XPATH)).text
+def getting_population_on_ibge(bot, excel, city_name):
+    populacao =bot.find_element("//*[@id='detalhes']/panorama-temas/panorama-painel[1]/div/div[1]/panorama-card[1]/div/div[2]", By.XPATH)
+    strPopulacao = populacao.text
+    print(f"{city_name} {strPopulacao}")
+    excel.add_row([city_name, strPopulacao])
 
-
-def finish_task(maestro, task_id):
-    maestro.finish_task(
-        task_id=task_id,
-        status=AutomationTaskFinishStatus.SUCCESS,
-        message="Task Finished OK."
-    )
+def not_found(label):
+    print(f"Element not found: {label}")
 
 if __name__ == '__main__':
     main()
